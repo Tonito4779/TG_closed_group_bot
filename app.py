@@ -4,6 +4,7 @@
 # - вебхук /webhook/{secret} з перевіркою секрету
 # - /start через CommandHandler + catch-all логер
 # - chat_join_request: лог + auto-approve + (опційно) запис у Google Sheets
+# - /logme: ручний запис профілю користувача у Google Sheets (для тесту інтеграції)
 #
 # ENV (Render → Settings → Environment):
 #   BOT_TOKEN          = <токен твого бота>
@@ -51,7 +52,7 @@ tg_app: Application | None = None
 
 # --------- Google Sheets (опційно) ---------
 gspread_enabled = False
-ws = None  # тип: gspread.Worksheet або None
+ws = None  # gspread.Worksheet | None
 
 def _init_gsheets():
     """Ініціалізація клієнта Google Sheets, якщо задані ENV."""
@@ -64,7 +65,8 @@ def _init_gsheets():
         if not gsa_json or not sheet_id:
             logger.info("[SHEETS] env not set -> disabled")
             gspread_enabled = False
-            return
+            ws = None
+            return None
 
         import gspread
         from google.oauth2.service_account import Credentials
@@ -89,11 +91,13 @@ def _init_gsheets():
             ])
 
         gspread_enabled = True
+        ws = _ws
         logger.info("[SHEETS] ready: id=%s sheet=%s", sheet_id, sheet_name)
-        return _ws
+        return ws
     except Exception as e:
         logger.warning("[SHEETS] init failed: %s", e)
         gspread_enabled = False
+        ws = None
         return None
 
 # --------- HANDLERS ---------
@@ -131,13 +135,40 @@ async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error("Approve failed for user_id=%s: %s", user.id, e)
 
-    # DM після approve НЕ шлемо навмисно (щоб не ловити 400, якщо юзер не стартував бота)
+    # DM після approve НЕ шлемо (щоб не ловити 400, якщо юзер не стартував бота)
 
 async def on_start_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else None
     logger.info("[MSG] /start from user_id=%s", uid)
     if update.message:
         await update.message.reply_text("Бот живий. Вебхук працює ✅")
+
+async def on_logme(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Ручний запис профілю користувача у Google Sheets — для тесту інтеграції."""
+    if not update.message:
+        return
+    if not (gspread_enabled and ws):
+        await update.message.reply_text("Sheets поки не налаштовані (нема GSA_CREDENTIALS/SHEET_ID).")
+        return
+
+    u = update.effective_user
+    try:
+        ws.append_row([
+            datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "",                        # chat_id (не з join'у)
+            str(u.id),
+            u.username or "",
+            u.first_name or "",
+            u.last_name or "",
+            getattr(u, "language_code", "") or "",
+            "",                        # bio
+            "manual:/logme"            # позначка джерела
+        ])
+        logger.info("[SHEETS] row appended via /logme for user_id=%s", u.id)
+        await update.message.reply_text("✅ Додав твій запис у Google Sheets.")
+    except Exception as e:
+        logger.error("[SHEETS] /logme append failed: %s", e)
+        await update.message.reply_text(f"❌ Не зміг записати у Sheets: {e}")
 
 async def on_any_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -149,18 +180,19 @@ async def on_any_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # --------- LIFECYCLE ---------
 @app.on_event("startup")
 async def startup():
-    global tg_app, ws
+    global tg_app
     # Telegram app
     tg_app = Application.builder().token(BOT_TOKEN).build()
     tg_app.add_handler(ChatJoinRequestHandler(on_join_request))
-    tg_app.add_handler(CommandHandler("start", on_start_msg))      # надійно ловить /start
+    tg_app.add_handler(CommandHandler("start", on_start_msg))      # /start
+    tg_app.add_handler(CommandHandler("logme", on_logme))          # /logme → запис у Sheets
     tg_app.add_handler(MessageHandler(filters.ALL, on_any_msg))    # діагностика
     await tg_app.initialize()
     await tg_app.start()
     logger.info("[OK] Telegram application started")
 
     # Google Sheets
-    ws = _init_gsheets()
+    _init_gsheets()
 
 @app.on_event("shutdown")
 async def shutdown():
