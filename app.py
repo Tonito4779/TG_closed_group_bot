@@ -17,7 +17,7 @@ from telegram.ext import (
 
 # ========= ENV =========
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "change_me_secret")  # має збігатися з тим, що ти ставиш у setWebhook
+WEBHOOK_SECRET = os.environ["WEBHOOK_SECRET"]
 
 # ========= LOGGING =========
 # Логи видно у Render → Logs
