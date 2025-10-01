@@ -6,7 +6,7 @@ services:
   buildCommand: pip install -r requirements.txt
   startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
   envVars:
-  - key: BOT_TOKEN
-    sync: false         # додаси вручну у Dashboard
+  - key: 6918129180:AAE-VI14THjHS48zfZN-XRZfPAbszvae9e0
+    sync: false
   - key: WEBHOOK_SECRET
     value: very_long_random_secret_string
