@@ -9,18 +9,22 @@ services:
 
     envVars:
       # === Telegram ===
-      - key: BOT_TOKEN               # Токен твого бота з BotFather
+      - key: BOT_TOKEN
         sync: false                  # поставиш у Dashboard (Secrets)
 
-      - key: WEBHOOK_SECRET          # Довільний довгий секрет (використаєш у URL вебхука)
+      - key: WEBHOOK_SECRET
         value: super_long_random_secret_123
 
       # === Google Ads ===
-      - key: GOOGLE_ADS_YAML         # Повний вміст google-ads.yaml як текст
-        sync: false                  # вставити у Dashboard (Secrets)
-
-      - key: GA_CUSTOMER_ID          # Наприклад 1234567890 (БЕЗ дефісів)
+      - key: GOOGLE_ADS_YAML
+        sync: false
+      - key: GA_CUSTOMER_ID
+        sync: false                  # Напр. 1234567890 (БЕЗ дефісів)
+      - key: GA_CONVERSION_ACTION_ID
         sync: false
 
-      - key: GA_CONVERSION_ACTION_ID # ID дії конверсії (ціле число / рядок)
-        sync: false
+      # === (Опційно) Google Sheets backend ===
+      # - key: GSA_CREDENTIALS
+      #   sync: false                 # Весь JSON Service Account (тільки якщо треба стале сховище)
+      # - key: SHEET_ID
+      #   sync: false

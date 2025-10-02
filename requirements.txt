@@ -1,6 +1,6 @@
 python-telegram-bot==21.10
 fastapi==0.115.0
 uvicorn==0.30.6
+google-ads==24.1.0
 gspread==6.1.4
 google-auth==2.34.0
-google-ads==24.1.0
