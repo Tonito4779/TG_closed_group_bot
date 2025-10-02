@@ -1,21 +1,18 @@
 # app.py — FastAPI + python-telegram-bot v21.x + Google Ads Offline Click Conversions
-# Працює на безкоштовному Render без БД.
-# Збереження прив'язок:
-#   1) In-memory (дефолт, злітає після рестарту)
-#   2) (Опціонально) Google Sheets, якщо задані GSA_CREDENTIALS + SHEET_ID
+# Працює на безкоштовному Render без БД (in-memory). Опційно — Google Sheets.
 #
-# ENV (Render → Settings → Environment):
+# ENV (Render → Environment):
 #   BOT_TOKEN               = <токен бота>
 #   WEBHOOK_SECRET          = <секрет у URL вебхука>
-#   GOOGLE_ADS_YAML         = <повний google-ads.yaml (developer_token, client_id, client_secret, refresh_token, ...)>
+#   GOOGLE_ADS_YAML         = <повний google-ads.yaml як ТЕКСТ>
 #   GA_CUSTOMER_ID          = <ID Google Ads БЕЗ дефісів, напр. 1234567890>
 #   GA_CONVERSION_ACTION_ID = <ID дії конверсії>
-#   # (опційно для Sheets)
+#   # (опційно для сталого зберігання)
 #   GSA_CREDENTIALS         = <JSON Service Account, весь файл як текст>
 #   SHEET_ID                = <ID Google Sheets (з URL)>
 #   LOG_LEVEL               = INFO | DEBUG (опційно)
 #
-# Start Command (Render):
+# Start (Render):
 #   uvicorn app:app --host 0.0.0.0 --port $PORT
 
 import os
@@ -44,8 +41,8 @@ GA_YAML = os.getenv("GOOGLE_ADS_YAML")
 GA_CUSTOMER_ID = os.getenv("GA_CUSTOMER_ID")
 GA_CONVERSION_ACTION_ID = os.getenv("GA_CONVERSION_ACTION_ID")
 
-GSA_CREDENTIALS = os.getenv("GSA_CREDENTIALS")  # JSON text
-SHEET_ID = os.getenv("SHEET_ID")                # Google Sheets ID
+GSA_CREDENTIALS = os.getenv("GSA_CREDENTIALS")  # JSON text (optional)
+SHEET_ID = os.getenv("SHEET_ID")                # Google Sheets ID (optional)
 
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
@@ -60,7 +57,7 @@ tg_app: Application | None = None
 
 # ===== Storage layer =====
 class Storage:
-    """Абстракція сховища: in-memory або Google Sheets."""
+    """In-memory за замовчуванням. Якщо задані GSA_CREDENTIALS+SHEET_ID — використовує Google Sheets."""
     def __init__(self):
         self.backend = "memory"
         self._mem: Dict[int, Dict[str, str]] = {}
@@ -70,7 +67,6 @@ class Storage:
             try:
                 import gspread
                 from google.oauth2.service_account import Credentials
-
                 scopes = [
                     "https://www.googleapis.com/auth/spreadsheets",
                     "https://www.googleapis.com/auth/drive",
@@ -95,9 +91,7 @@ class Storage:
         if self.backend == "memory":
             self._mem[user_id] = {key: value}
             return
-        # Sheets
         try:
-            # Пошук user_id; якщо нема — append
             records = self._sheet.get_all_records()  # type: ignore
             row_index = None
             for idx, rec in enumerate(records, start=2):
@@ -120,7 +114,6 @@ class Storage:
                 return None
             k = next(iter(entry.keys()))
             return (k, entry[k])
-        # Sheets
         try:
             records = self._sheet.get_all_records()  # type: ignore
             for rec in records:
@@ -138,9 +131,7 @@ class Storage:
     def remove_click(self, user_id: int) -> bool:
         if self.backend == "memory":
             return self._mem.pop(user_id, None) is not None
-        # Sheets
         try:
-            # Проста реалізація: перечитати і переписати (ок для малих обсягів)
             records = self._sheet.get_all_records()  # type: ignore
             new_rows = [["user_id", "key", "value"]]
             removed = False
@@ -164,11 +155,9 @@ if GA_YAML and GA_CUSTOMER_ID and GA_CONVERSION_ACTION_ID:
     try:
         import pathlib
         from google.ads.googleads.client import GoogleAdsClient
-
         cfg_path = pathlib.Path("/var/tmp/google-ads.yaml")
         cfg_path.write_text(GA_YAML, encoding="utf-8")
         os.environ["GOOGLE_ADS_CONFIGURATION_FILE_PATH"] = str(cfg_path)
-
         google_ads_client = GoogleAdsClient.load_from_storage(str(cfg_path))
         logger.info("[GADS] client init OK (customer_id=%s, action_id=%s)",
                     GA_CUSTOMER_ID, GA_CONVERSION_ACTION_ID)
@@ -196,14 +185,13 @@ def classify_click_id(value: str) -> Tuple[str, str]:
         return "wbraid", re.sub(r"^.*wbraid=([^&\s]+).*$", r"\1", v)
     if "gbraid=" in low or low.startswith("gbraid."):
         return "gbraid", re.sub(r"^.*gbraid=([^&\s]+).*$", r"\1", v)
-    if "gclid=" in low or low.startswith("c."):  # gclid часто Cj0..., може прийти як "gclid=XXX"
+    if "gclid=" in low or low.startswith("c."):  # gclid часто як Cj0..., або "gclid=XXX"
         return "gclid", re.sub(r"^.*gclid=([^&\s]+).*$", r"\1", v)
 
-    # якщо просто значення — спробуємо евристику
     if re.match(r"^[A-Za-z0-9._-]{10,}$", v):
         return "gclid", v
 
-    return "gclid", v  # за замовчуванням
+    return "gclid", v
 
 def upload_click_conversion(
     *,
@@ -222,7 +210,6 @@ def upload_click_conversion(
     conv_service = google_ads_client.get_service("ConversionUploadService")
     conv = google_ads_client.get_type("ClickConversion")
 
-    # один із ідентифікаторів кліку ОБОВ’ЯЗКОВО
     if gclid:
         conv.gclid = gclid
     if gbraid:
@@ -259,7 +246,7 @@ async def on_start_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id if update.effective_user else None
     if update.message:
         has_ga = bool(google_ads_client)
-        await update.message.replyText(
+        await update.message.reply_text(
             "Бот живий. Вебхук працює ✅\n"
             f"Google Ads клієнт: {'OK' if has_ga else '— (env неповні)'}\n"
             f"Сховище: {ST.backend}\n\n"
@@ -311,10 +298,13 @@ async def on_convert_test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         when = iso_for_google_ads(datetime.now(timezone.utc))
         dedup_id = f"tg-{uid}-{int(datetime.now().timestamp())}-{uuid.uuid4().hex[:8]}"
-        kwargs = {"conversion_action_id": str(GA_CONVERSION_ACTION_ID),
-                  "conversion_datetime_iso": when,
-                  "value": 0.0, "currency": "UAH",
-                  "order_id": dedup_id}
+        kwargs = {
+            "conversion_action_id": str(GA_CONVERSION_ACTION_ID),
+            "conversion_datetime_iso": when,
+            "value": 0.0,
+            "currency": "UAH",
+            "order_id": dedup_id,
+        }
         if key == "gclid":
             kwargs["gclid"] = val
         elif key == "gbraid":
@@ -369,11 +359,13 @@ async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
             key, val = pair
             when = iso_for_google_ads(datetime.now(timezone.utc))
             dedup_id = f"join-{user.id}-{int(datetime.now().timestamp())}-{uuid.uuid4().hex[:8]}"
-
-            kwargs = {"conversion_action_id": str(GA_CONVERSION_ACTION_ID),
-                      "conversion_datetime_iso": when,
-                      "value": 0.0, "currency": "UAH",
-                      "order_id": dedup_id}
+            kwargs = {
+                "conversion_action_id": str(GA_CONVERSION_ACTION_ID),
+                "conversion_datetime_iso": when,
+                "value": 0.0,
+                "currency": "UAH",
+                "order_id": dedup_id,
+            }
             if key == "gclid":
                 kwargs["gclid"] = val
             elif key == "gbraid":
@@ -388,6 +380,10 @@ async def on_join_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error("[GADS] join upload failed: %s", e)
 
+# ===== Error handler (щоб бачити нормальні трейсбеки у логах) =====
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.exception("Unhandled error in handler", exc_info=context.error)
+
 # ===== Lifecycle =====
 @app.on_event("startup")
 async def startup():
@@ -399,7 +395,8 @@ async def startup():
     tg_app.add_handler(CommandHandler("convert_test", on_convert_test))
     tg_app.add_handler(CommandHandler("whoami", on_whoami))
     tg_app.add_handler(CommandHandler("clear_bind", on_clear_bind))
-    tg_app.add_handler(MessageHandler(filters.ALL, on_any_msg))  # діагностика
+    tg_app.add_handler(MessageHandler(filters.ALL, on_any_msg))
+    tg_app.add_error_handler(on_error)
     await tg_app.initialize()
     await tg_app.start()
     logger.info("[OK] Telegram application started")
