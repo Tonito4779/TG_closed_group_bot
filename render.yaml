@@ -9,15 +9,22 @@ services:
 
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9   # або 3.11.10
+        value: 3.11.10
+
       - key: BOT_TOKEN
         sync: false
       - key: WEBHOOK_SECRET
         value: super_long_random_secret_123
+
       - key: GOOGLE_ADS_YAML
         sync: false
       - key: GA_CUSTOMER_ID
         sync: false
       - key: GA_CONVERSION_ACTION_ID
         sync: false
-      # опціонально: GSA_CREDENTIALS / SHEET_ID
+
+      # (необов’язково, якщо хочеш зберігати прив’язки у Sheets)
+      # - key: GSA_CREDENTIALS
+      #   sync: false
+      # - key: SHEET_ID
+      #   sync: false
