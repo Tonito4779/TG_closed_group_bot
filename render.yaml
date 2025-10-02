@@ -1,12 +1,26 @@
 services:
-- type: web
-  name: telebot-mvp
-  env: python
-  plan: free
-  buildCommand: pip install -r requirements.txt
-  startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
-  envVars:
-  - key: BOT_TOKEN
-    sync: false
-  - key: WEBHOOK_SECRET
-    value: very_long_random_secret_string
+  - type: web
+    name: tg-closed-group-bot
+    env: python
+    plan: free
+    branch: main
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+
+    envVars:
+      # === Telegram ===
+      - key: BOT_TOKEN               # Токен твого бота з BotFather
+        sync: false                  # поставиш у Dashboard (Secrets)
+
+      - key: WEBHOOK_SECRET          # Довільний довгий секрет (використаєш у URL вебхука)
+        value: super_long_random_secret_123
+
+      # === Google Ads ===
+      - key: GOOGLE_ADS_YAML         # Повний вміст google-ads.yaml як текст
+        sync: false                  # вставити у Dashboard (Secrets)
+
+      - key: GA_CUSTOMER_ID          # Наприклад 1234567890 (БЕЗ дефісів)
+        sync: false
+
+      - key: GA_CONVERSION_ACTION_ID # ID дії конверсії (ціле число / рядок)
+        sync: false
